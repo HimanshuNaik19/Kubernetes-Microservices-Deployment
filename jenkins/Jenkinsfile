@@ -1,0 +1,189 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = 'docker.io'
+        DOCKER_HUB_USER = 'himanshunaik22'
+        DOCKER_CREDENTIALS = credentials('docker-hub-credentials')
+        K8S_NAMESPACE = 'dev'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+                checkout scm
+            }
+        }
+        
+        stage('Build Docker Images') {
+            parallel {
+                stage('Build Frontend') {
+                    steps {
+                        script {
+                            echo 'Building frontend image...'
+                            sh '''
+                                cd app/frontend
+                                docker build -t ${DOCKER_HUB_USER}/task-frontend:${IMAGE_TAG} .
+                                docker tag ${DOCKER_HUB_USER}/task-frontend:${IMAGE_TAG} ${DOCKER_HUB_USER}/task-frontend:latest
+                            '''
+                        }
+                    }
+                }
+                stage('Build Backend') {
+                    steps {
+                        script {
+                            echo 'Building backend image...'
+                            sh '''
+                                cd app/backend
+                                docker build -t ${DOCKER_HUB_USER}/task-backend:${IMAGE_TAG} .
+                                docker tag ${DOCKER_HUB_USER}/task-backend:${IMAGE_TAG} ${DOCKER_HUB_USER}/task-backend:latest
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                echo 'Running tests...'
+                sh '''
+                    echo "Unit tests would run here"
+                    # Add your test commands
+                '''
+            }
+        }
+        
+        stage('Push Images') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo 'Pushing images to registry...'
+                    sh '''
+                        echo ${DOCKER_CREDENTIALS_PSW} | docker login -u ${DOCKER_CREDENTIALS_USR} --password-stdin
+                        docker push ${DOCKER_HUB_USER}/task-frontend:${IMAGE_TAG}
+                        docker push ${DOCKER_HUB_USER}/task-frontend:latest
+                        docker push ${DOCKER_HUB_USER}/task-backend:${IMAGE_TAG}
+                        docker push ${DOCKER_HUB_USER}/task-backend:latest
+                    '''
+                }
+            }
+        }
+        
+        stage('Deploy to Dev') {
+            steps {
+                script {
+                    echo 'Deploying to dev namespace...'
+                    sh '''
+                        kubectl apply -f k8s/base/namespaces/dev.yaml
+                        kubectl apply -f k8s/base/configmaps/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/secrets/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/rbac/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/statefulsets/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/deployments/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/services/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/ingress/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/autoscaling/ -n ${K8S_NAMESPACE}
+                        kubectl apply -f k8s/base/network/ -n ${K8S_NAMESPACE}
+                    '''
+                }
+            }
+        }
+        
+        stage('Wait for Deployment') {
+            steps {
+                script {
+                    echo 'Waiting for deployments to be ready...'
+                    sh '''
+                        kubectl wait --for=condition=available --timeout=300s \
+                            deployment/frontend deployment/backend -n ${K8S_NAMESPACE}
+                        kubectl wait --for=condition=ready --timeout=300s \
+                            pod -l app=postgres -n ${K8S_NAMESPACE}
+                    '''
+                }
+            }
+        }
+        
+        stage('Integration Tests') {
+            steps {
+                echo 'Running integration tests...'
+                sh '''
+                    echo "Integration tests would run here"
+                    # kubectl run test-pod --image=curlimages/curl --rm -it -- curl http://backend:8080/health
+                '''
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo 'Deploying to staging namespace...'
+                    sh '''
+                        kubectl apply -f k8s/base/namespaces/staging.yaml
+                        kubectl apply -f k8s/base/ -n staging
+                    '''
+                }
+            }
+        }
+        
+        stage('Approval for Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                input message: 'Deploy to production?', ok: 'Deploy'
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo 'Deploying to production namespace...'
+                    sh '''
+                        kubectl apply -f k8s/base/namespaces/prod.yaml
+                        kubectl apply -f k8s/base/ -n prod
+                        kubectl wait --for=condition=available --timeout=300s \
+                            deployment --all -n prod
+                    '''
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    echo 'Verifying deployment...'
+                    sh '''
+                        kubectl get pods -n ${K8S_NAMESPACE}
+                        kubectl get svc -n ${K8S_NAMESPACE}
+                        kubectl get ingress -n ${K8S_NAMESPACE}
+                        kubectl get hpa -n ${K8S_NAMESPACE}
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+        always {
+            echo 'Cleaning up...'
+            sh 'docker system prune -f'
+        }
+    }
+}

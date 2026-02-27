@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: dev
+data:
+  # Database configuration
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "taskdb"
+  
+  # API configuration
+  API_PORT: "8080"
+  LOG_LEVEL: "INFO"
+  
+  # Frontend configuration
+  REACT_APP_API_URL: "/api"

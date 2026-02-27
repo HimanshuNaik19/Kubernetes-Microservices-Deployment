@@ -1,0 +1,112 @@
+---
+- name: Setup Jenkins for Kubernetes CI/CD
+  hosts: localhost
+  become: yes
+  vars:
+    jenkins_version: "2.426.1"
+    
+  tasks:
+    - name: Install Java (Jenkins requirement)
+      apt:
+        name: openjdk-11-jdk
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      
+    - name: Add Jenkins repository key
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        state: present
+      when: ansible_os_family == "Debian"
+      
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: deb https://pkg.jenkins.io/debian-stable binary/
+        state: present
+      when: ansible_os_family == "Debian"
+      
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      
+    - name: Start and enable Jenkins
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+        
+    - name: Install Docker (for Jenkins agents)
+      block:
+        - name: Install Docker dependencies
+          apt:
+            name:
+              - apt-transport-https
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+            
+        - name: Add Docker GPG key
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+            
+        - name: Add Docker repository
+          apt_repository:
+            repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+            
+        - name: Install Docker
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+            state: present
+            update_cache: yes
+            
+        - name: Add Jenkins user to docker group
+          user:
+            name: jenkins
+            groups: docker
+            append: yes
+            
+    - name: Install kubectl for Jenkins
+      get_url:
+        url: "https://dl.k8s.io/release/stable.txt"
+        dest: /tmp/k8s-version.txt
+      register: kubectl_download
+      
+    - name: Get kubectl version
+      shell: cat /tmp/k8s-version.txt
+      register: kubectl_version
+      
+    - name: Download kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_version.stdout }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+        
+    - name: Wait for Jenkins to start
+      wait_for:
+        port: 8080
+        delay: 10
+        timeout: 300
+        
+    - name: Get Jenkins initial admin password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_password
+      ignore_errors: yes
+      
+    - name: Display Jenkins initial password
+      debug:
+        msg: "Jenkins initial admin password: {{ jenkins_password.stdout }}"
+      when: jenkins_password.stdout is defined
+      
+    - name: Display Jenkins URL
+      debug:
+        msg: "Jenkins is available at: http://localhost:8080"

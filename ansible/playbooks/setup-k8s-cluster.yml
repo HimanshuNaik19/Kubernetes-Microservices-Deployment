@@ -1,0 +1,67 @@
+---
+- name: Setup Kubernetes Cluster
+  hosts: localhost
+  become: yes
+  vars:
+    k8s_version: "1.28"
+    minikube_version: "latest"
+    
+  tasks:
+    - name: Install kubectl
+      block:
+        - name: Download kubectl
+          get_url:
+            url: "https://dl.k8s.io/release/stable.txt"
+            dest: /tmp/k8s-version.txt
+            
+        - name: Get kubectl version
+          shell: cat /tmp/k8s-version.txt
+          register: kubectl_version
+          
+        - name: Download kubectl binary
+          get_url:
+            url: "https://dl.k8s.io/release/{{ kubectl_version.stdout }}/bin/linux/amd64/kubectl"
+            dest: /usr/local/bin/kubectl
+            mode: '0755'
+            
+        - name: Verify kubectl installation
+          command: kubectl version --client
+          
+    - name: Install Minikube
+      block:
+        - name: Download Minikube
+          get_url:
+            url: "https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64"
+            dest: /usr/local/bin/minikube
+            mode: '0755'
+            
+        - name: Verify Minikube installation
+          command: minikube version
+          
+    - name: Start Minikube cluster
+      command: minikube start --cpus=4 --memory=8192 --driver=docker
+      become: no
+      
+    - name: Enable Minikube addons
+      command: "{{ item }}"
+      become: no
+      loop:
+        - minikube addons enable ingress
+        - minikube addons enable metrics-server
+        
+    - name: Verify cluster is running
+      command: kubectl cluster-info
+      become: no
+      
+    - name: Create namespaces
+      command: kubectl apply -f {{ playbook_dir }}/../k8s/base/namespaces/
+      become: no
+      
+    - name: Display cluster status
+      command: kubectl get nodes
+      become: no
+      register: nodes_output
+      
+    - name: Show nodes
+      debug:
+        msg: "{{ nodes_output.stdout_lines }}"

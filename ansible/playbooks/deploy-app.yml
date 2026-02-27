@@ -1,0 +1,67 @@
+---
+- name: Deploy Application to Kubernetes
+  hosts: localhost
+  vars:
+    namespace: "dev"
+    k8s_manifests_path: "{{ playbook_dir }}/../k8s/base"
+    
+  tasks:
+    - name: Create namespace
+      command: kubectl apply -f {{ k8s_manifests_path }}/namespaces/{{ namespace }}.yaml
+      
+    - name: Apply ConfigMaps
+      command: kubectl apply -f {{ k8s_manifests_path }}/configmaps/ -n {{ namespace }}
+      
+    - name: Apply Secrets
+      command: kubectl apply -f {{ k8s_manifests_path }}/secrets/ -n {{ namespace }}
+      
+    - name: Apply RBAC
+      command: kubectl apply -f {{ k8s_manifests_path }}/rbac/ -n {{ namespace }}
+      
+    - name: Deploy StatefulSets
+      command: kubectl apply -f {{ k8s_manifests_path }}/statefulsets/ -n {{ namespace }}
+      
+    - name: Wait for StatefulSets to be ready
+      command: kubectl wait --for=condition=ready --timeout=300s pod -l app=postgres -n {{ namespace }}
+      
+    - name: Deploy applications
+      command: kubectl apply -f {{ k8s_manifests_path }}/deployments/ -n {{ namespace }}
+      
+    - name: Deploy services
+      command: kubectl apply -f {{ k8s_manifests_path }}/services/ -n {{ namespace }}
+      
+    - name: Deploy ingress
+      command: kubectl apply -f {{ k8s_manifests_path }}/ingress/ -n {{ namespace }}
+      
+    - name: Deploy HPA
+      command: kubectl apply -f {{ k8s_manifests_path }}/autoscaling/ -n {{ namespace }}
+      
+    - name: Deploy NetworkPolicies
+      command: kubectl apply -f {{ k8s_manifests_path }}/network/ -n {{ namespace }}
+      
+    - name: Wait for deployments to be ready
+      command: kubectl wait --for=condition=available --timeout=300s deployment --all -n {{ namespace }}
+      
+    - name: Get deployment status
+      command: kubectl get all -n {{ namespace }}
+      register: deployment_status
+      
+    - name: Display deployment status
+      debug:
+        msg: "{{ deployment_status.stdout_lines }}"
+        
+    - name: Run smoke tests
+      block:
+        - name: Check frontend health
+          command: kubectl exec -n {{ namespace }} deployment/frontend -- wget -q -O- http://localhost/health
+          register: frontend_health
+          
+        - name: Check backend health
+          command: kubectl exec -n {{ namespace }} deployment/backend -- python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').read())"
+          register: backend_health
+          
+        - name: Display health check results
+          debug:
+            msg:
+              - "Frontend: {{ frontend_health.stdout }}"
+              - "Backend: {{ backend_health.stdout }}"
