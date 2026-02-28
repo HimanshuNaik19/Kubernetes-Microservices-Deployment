@@ -3,6 +3,9 @@ FROM jenkins/jenkins:lts
 # Switch to root to install tools
 USER root
 
+# Fix Git safe directory issue when running as root
+RUN git config --global --add safe.directory '*'
+
 # Install Docker CLI
 RUN apt-get update && apt-get install -y \
     apt-transport-https \
