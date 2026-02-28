@@ -12,6 +12,7 @@ services:
       - jenkins_data:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock # Docker-in-Docker
       - ~/.kube:/var/jenkins_home/.kube:ro # Kubernetes config (read-only)
+    user: root # Run as root for Docker socket access
     environment:
       - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
     networks:

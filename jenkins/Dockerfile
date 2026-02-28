@@ -25,6 +25,9 @@ RUN apt-get update && apt-get install -y python3-pip \
     && pip3 install ansible --break-system-packages \
     && rm -rf /var/lib/apt/lists/*
 
+# Add jenkins user to docker group
+RUN groupadd -f docker && usermod -aG docker jenkins
+
 # Switch back to jenkins user
 USER jenkins
 
